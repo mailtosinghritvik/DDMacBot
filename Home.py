@@ -684,8 +684,9 @@ with col1:
                 elif result['type'] == "RAG Vector Store Entry":
                     col_a, col_b = st.columns(2)
                     with col_a:
-                        if st.button(f"💬 Chat with Vector Store", key=f"chat_{result['type']}", use_container_width=True):
-                            st.info("Navigate to Chat page to query the vector store about this project!")
+                        # if st.button(f"💬 Chat with Vector Store", key=f"chat_{result['type']}", use_container_width=True):
+                        #     st.info("Navigate to Chat page to query the vector store about this project!")
+                        st.info("💬 Use floating chat for vector store queries")
                     with col_b:
                         status_color = "🟢" if result.get('status') == 'Success' else "🔴"
                         st.write(f"Status: {status_color} {result.get('status', 'Unknown')}")
@@ -693,8 +694,9 @@ with col1:
                 elif result['type'] == "Assistant Thread":
                     col_a, col_b = st.columns(2)
                     with col_a:
-                        if st.button(f"🤖 Chat with Assistant", key=f"assistant_{result['type']}", use_container_width=True):
-                            st.info(f"Use the floating chat widget below to chat with your dedicated assistant!")
+                        # if st.button(f"🤖 Chat with Assistant", key=f"assistant_{result['type']}", use_container_width=True):
+                        #     st.info(f"Use the floating chat widget below to chat with your dedicated assistant!")
+                        st.info("🤖 Use floating chat widget below!")
                     with col_b:
                         if st.button(f"📋 Copy Assistant ID", key=f"copy_{result['type']}", use_container_width=True):
                             st.code(st.session_state.assistant_id)
@@ -711,20 +713,22 @@ with col2:
     if st.session_state.conversion_results:
         st.markdown("**🎯 What you can do now:**")
         
-        if st.button("💬 Start Chatting", use_container_width=True):
-            st.info("Navigate to Chat page to ask questions about your project")
+        # if st.button("💬 Start Chatting", use_container_width=True):
+        #     st.info("Navigate to Chat page to ask questions about your project")
         
-        if st.button("📄 Generate Documents", use_container_width=True):
-            st.info("Use chat to request Word docs, PDFs, or custom reports")
+        # if st.button("📄 Generate Documents", use_container_width=True):
+        #     st.info("Use chat to request Word docs, PDFs, or custom reports")
         
-        if st.button("📧 Email Results", use_container_width=True):
-            st.success("Email integration will be implemented in backend phase")
+        # if st.button("📧 Email Results", use_container_width=True):
+        #     st.success("Email integration will be implemented in backend phase")
         
-        if st.button("📅 Schedule Meeting", use_container_width=True):
-            st.success("Calendar integration will be implemented in backend phase")
+        # if st.button("📅 Schedule Meeting", use_container_width=True):
+        #     st.success("Calendar integration will be implemented in backend phase")
         
-        if st.button("🔗 Share Link", use_container_width=True):
-            st.success("Share functionality will be implemented in backend phase")
+        # if st.button("🔗 Share Link", use_container_width=True):
+        #     st.success("Share functionality will be implemented in backend phase")
+        
+        st.info("Use the floating chat widget below to interact with your processed data!")
     else:
         st.info("Upload and convert a file to see quick actions")
     
@@ -899,11 +903,12 @@ if st.session_state.conversion_results and st.session_state.thread_id and st.ses
 
 elif st.session_state.conversion_results:
     project_name = st.session_state.project_info.get('project_name', 'this project') if st.session_state.project_info else 'this project'
-    st.markdown(f"""
-    <div class="floating-chat" onclick="alert('Navigate to Chat page to ask questions about {project_name}!')">
-        💬 Chat about {project_name}...
-    </div>
-    """, unsafe_allow_html=True)
+    # st.markdown(f"""
+    # <div class="floating-chat" onclick="alert('Navigate to Chat page to ask questions about {project_name}!')">
+    #     💬 Chat about {project_name}...
+    # </div>
+    # """, unsafe_allow_html=True)
+    st.info(f"💬 Processing complete! Use the chat button above to talk about {project_name}")
 
 # Reset button in sidebar
 with st.sidebar:
@@ -939,11 +944,11 @@ with st.sidebar:
         else:
             st.warning("⚠️ Vector store upload failed")
     
-    st.markdown("---")
-    st.markdown("### 📈 Usage Stats")
-    st.metric("Files Processed Today", "12")
-    st.metric("Total Conversions", "1,247")
-    st.metric("Average Processing Time", "Real-time")
+    # st.markdown("---")
+    # st.markdown("### 📈 Usage Stats")
+    # st.metric("Files Processed Today", "12")
+    # st.metric("Total Conversions", "1,247")
+    # st.metric("Average Processing Time", "Real-time")
     
     st.markdown("---")
     st.markdown("### ℹ️ About")

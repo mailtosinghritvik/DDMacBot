@@ -9,9 +9,16 @@ import tempfile
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Configuration - Update these with your actual IDs
-VECTOR_STORE_ID = 'vs_qUspcB7VllWXM4z7aAEdIK9L'  # Replace with your actual vector store ID
-ASSISTANT_ID = 'asst_Wk1Ue0iDYkhbdiXXDPPJsvAV'  # Replace with your actual assistant ID
+# Vector Store ID for main RAG system (replace with your actual vector store ID)
+VECTOR_STORE_ID = 'vs_qUspcB7VllWXM4z7aAEdIK9L'
+
+# Set page configuration
+st.set_page_config(
+    page_title="AccuBid Converter",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # Assistant Helper Functions
 def process_excel_file(file):
@@ -191,9 +198,12 @@ def upload_to_vector_store(markdown_content, filename):
     except Exception as e:
         return False, f"Error uploading to vector store: {str(e)}"
 
-def create_assistant_with_excel(uploaded_file, project_info):
-    """Create a new Assistant with code_interpreter and attach the Excel file"""
+def create_assistant_thread_with_excel(uploaded_file):
+    """Create a new Assistant thread and upload the Excel file to it"""
     try:
+        # Create a new thread
+        thread = client.beta.threads.create()
+        
         # Save Excel file temporarily
         temp_path = os.path.join(tempfile.gettempdir(), uploaded_file.name)
         with open(temp_path, "wb") as f:
@@ -209,52 +219,10 @@ def create_assistant_with_excel(uploaded_file, project_info):
         # Clean up temp file
         os.remove(temp_path)
         
-        # Create a new Assistant with code_interpreter and the Excel file
-        assistant_name = f"DDMac Bot - {project_info.get('project_name', 'Project')} Analyzer"
-        assistant_description = f"""You are DDMac Bot, an expert assistant for analyzing electrical estimation and project spreadsheets. 
-
-Project Context:
-- Company: {project_info.get('company_name', 'Unknown')}
-- Project: {project_info.get('project_name', 'Unknown')}
-- Type: {project_info.get('project_type', 'Unknown')}
-- Location: {project_info.get('project_location', 'Not specified')}
-
-Your role is to:
-1. Analyze the uploaded Excel/CSV file in great detail
-2. Provide comprehensive answers about costs, materials, labor, timelines
-3. Generate summaries, charts, and data visualizations when requested
-4. Help users understand project scope, budgets, and technical details
-5. Identify trends, anomalies, or optimization opportunities in the data
-
-Always provide detailed, professional responses with specific data points, calculations, and actionable insights."""
-        
-        assistant = client.beta.assistants.create(
-            name=assistant_name,
-            description=assistant_description,
-            model="gpt-4o",
-            tools=[{"type": "code_interpreter"}],
-            tool_resources={
-                "code_interpreter": {
-                    "file_ids": [file_obj.id]
-                }
-            }
-        )
-        
-        # Create a thread for this assistant
-        thread = client.beta.threads.create()
-        
-        return assistant.id, thread.id, file_obj.id, "Assistant and thread created successfully"
+        return thread.id, file_obj.id, "Thread created successfully"
         
     except Exception as e:
-        return None, None, None, f"Error creating assistant: {str(e)}"
-
-# Set page configuration
-st.set_page_config(
-    page_title="AccuBid Converter",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+        return None, None, f"Error creating thread: {str(e)}"
 
 # Custom CSS for better styling
 st.markdown("""
@@ -293,23 +261,25 @@ st.markdown("""
     }
     
     .result-card {
-        background: #f8f9fa;
+        background: white;
         padding: 1.5rem;
         border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         margin: 1rem 0;
-        border: 1px solid #dee2e6;
+        border-left: 4px solid #28a745;
     }
     
     .floating-chat {
         position: fixed;
         bottom: 20px;
         right: 20px;
-        background: #1f4e79;
+        background: linear-gradient(90deg, #1f4e79 0%, #2e7d32 100%);
         color: white;
-        padding: 12px 20px;
+        padding: 15px 25px;
         border-radius: 25px;
         cursor: pointer;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        font-weight: bold;
         z-index: 1000;
     }
     
@@ -339,27 +309,21 @@ if 'project_info' not in st.session_state:
     st.session_state.project_info = None
 if 'chat_open' not in st.session_state:
     st.session_state.chat_open = False
-# New session state for Assistant API integration
+# Assistant API integration session state
 if 'thread_id' not in st.session_state:
     st.session_state.thread_id = None
-if 'assistant_id' not in st.session_state:
-    st.session_state.assistant_id = None
 if 'file_id' not in st.session_state:
     st.session_state.file_id = None
 if 'markdown_content' not in st.session_state:
     st.session_state.markdown_content = None
 if 'vector_upload_success' not in st.session_state:
     st.session_state.vector_upload_success = False
-if 'floating_chat_messages' not in st.session_state:
-    st.session_state.floating_chat_messages = []
-if 'floating_chat_open' not in st.session_state:
-    st.session_state.floating_chat_open = False
 
 # Header
 st.markdown("""
 <div class="main-header">
     <h1>⚡ AccuBid Document Converter</h1>
-    <p>Transform your AccuBid files into professional Word documents and PDFs</p>
+    <p>Transform your AccuBid files with AI-powered analysis and Assistant API integration</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -464,7 +428,6 @@ with col1:
                     st.session_state.processing_status = 'processing'
                     st.rerun()
     
-    # Processing Status
     # REAL PROCESSING IMPLEMENTATION
     if st.session_state.uploaded_file and hasattr(st.session_state, 'project_info'):
         if st.session_state.processing_status == 'processing':
@@ -497,20 +460,17 @@ with col1:
                         st.session_state.processing_status = 'ready'
                         st.rerun()
                 else:
-                    if st.button("� Continue with AI Processing", type="primary"):
+                    if st.button("🚀 Continue with AI Processing", type="primary"):
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
-                        # Step 3: Create new Assistant with code_interpreter and Excel file
+                        # Step 3: Create Assistant thread with Excel file
                         progress_bar.progress(20)
-                        status_text.text('🤖 Creating dedicated AI assistant with code interpreter for your Excel data...')
-                        assistant_id, thread_id, file_id, assistant_msg = create_assistant_with_excel(
-                            st.session_state.uploaded_file, 
-                            st.session_state.project_info
-                        )
+                        status_text.text('🤖 Creating AI thread for project analysis...')
+                        thread_id, file_id, thread_msg = create_assistant_thread_with_excel(st.session_state.uploaded_file)
                         
-                        if not assistant_id:
-                            st.error(f"Failed to create assistant: {assistant_msg}")
+                        if not thread_id:
+                            st.error(f"Failed to create thread: {thread_msg}")
                             st.session_state.processing_status = 'error'
                             st.rerun()
                         
@@ -538,7 +498,6 @@ with col1:
                         time.sleep(1)
                         
                         # Store results
-                        st.session_state.assistant_id = assistant_id
                         st.session_state.thread_id = thread_id
                         st.session_state.file_id = file_id
                         st.session_state.markdown_content = markdown_content
@@ -562,9 +521,9 @@ with col1:
                             },
                             {
                                 "type": "Assistant Thread", 
-                                "filename": f"Assistant ID: {assistant_id}",
-                                "icon": "🤖",
-                                "description": "Dedicated AI assistant with Excel file and code interpreter"
+                                "filename": f"AI Thread for {project_info['project_name']}",
+                                "icon": "🤖", 
+                                "description": f"Thread ID: {thread_id} with Excel file attached"
                             }
                         ]
                         
@@ -575,7 +534,7 @@ with col1:
                 st.error(f"Processing failed: {str(e)}")
                 st.session_state.processing_status = 'error'
                 st.rerun()
-            
+                
         elif st.session_state.processing_status == 'complete':
             st.markdown('<div class="status-indicator status-complete">🎉 AI Enhancement Complete!</div>', unsafe_allow_html=True)
             
@@ -614,25 +573,23 @@ with col1:
                     col_a, col_b = st.columns(2)
                     with col_a:
                         if st.button(f"📄 View Markdown", key=f"view_{result['type']}", use_container_width=True):
-                            if hasattr(st.session_state, 'markdown_content') and st.session_state.markdown_content:
-                                st.markdown("### 📄 Generated Markdown Content")
-                                st.markdown("```markdown")
-                                st.text(st.session_state.markdown_content[:2000] + "..." if len(st.session_state.markdown_content) > 2000 else st.session_state.markdown_content)
-                                st.markdown("```")
+                            if st.session_state.markdown_content:
+                                with st.expander("📄 Generated Markdown Content", expanded=True):
+                                    st.markdown(st.session_state.markdown_content)
                             else:
-                                st.warning("Markdown content not available")
+                                st.info("Markdown content not available")
                     with col_b:
                         if st.button(f"⬇️ Download Markdown", key=f"download_{result['type']}", use_container_width=True):
-                            if hasattr(st.session_state, 'markdown_content') and st.session_state.markdown_content:
+                            if st.session_state.markdown_content:
                                 st.download_button(
                                     label="💾 Download Markdown File",
                                     data=st.session_state.markdown_content,
-                                    file_name=result['filename'],
+                                    file_name=f"{st.session_state.project_info['company_name']}_{st.session_state.project_info['project_name']}_enhanced.md",
                                     mime="text/markdown",
-                                    key=f"download_markdown_{result['type']}"
+                                    key=f"download_md_{result['type']}"
                                 )
                             else:
-                                st.warning("Markdown content not available for download")
+                                st.info("Markdown content not available")
                 
                 elif result['type'] == "RAG Vector Store Entry":
                     col_a, col_b = st.columns(2)
@@ -647,15 +604,11 @@ with col1:
                     col_a, col_b = st.columns(2)
                     with col_a:
                         if st.button(f"🤖 Chat with Assistant", key=f"assistant_{result['type']}", use_container_width=True):
-                            st.info(f"Use the floating chat widget below to chat with your dedicated assistant!")
+                            st.info(f"Navigate to Chat page and use Thread ID: {st.session_state.thread_id}")
                     with col_b:
-                        if st.button(f"📋 Copy Assistant ID", key=f"copy_{result['type']}", use_container_width=True):
-                            st.code(st.session_state.assistant_id)
-                            st.success("Assistant ID displayed above - copy manually")
-                
-                elif result['type'] == "Dashboard Entry":
-                    if st.button(f"📊 View in Dashboard", key=f"dashboard_{result['type']}", use_container_width=True):
-                        st.info("🚀 Navigate to the Dashboard page to see project analytics!")
+                        if st.button(f"📋 Copy Thread ID", key=f"copy_{result['type']}", use_container_width=True):
+                            st.code(st.session_state.thread_id)
+                            st.success("Thread ID displayed above - copy manually")
 
 with col2:
     # Quick Actions Panel
@@ -668,16 +621,16 @@ with col2:
     if st.session_state.conversion_results:
         st.markdown("**🎯 What you can do now:**")
         
-        if st.button("� Start Chatting", use_container_width=True):
+        if st.button("💬 Start Chatting", use_container_width=True):
             st.info("Navigate to Chat page to ask questions about your project")
         
         if st.button("📄 Generate Documents", use_container_width=True):
             st.info("Use chat to request Word docs, PDFs, or custom reports")
         
-        if st.button("� Email Stakeholders", use_container_width=True):
+        if st.button("📧 Email Results", use_container_width=True):
             st.success("Email integration will be implemented in backend phase")
         
-        if st.button("� Schedule Meeting", use_container_width=True):
+        if st.button("📅 Schedule Meeting", use_container_width=True):
             st.success("Calendar integration will be implemented in backend phase")
         
         if st.button("🔗 Share Link", use_container_width=True):
@@ -699,112 +652,18 @@ with col2:
             st.metric("Vector Store", "✅ Uploaded")
         elif st.session_state.processing_status == 'complete':
             st.metric("Vector Store", "❌ Failed")
-        if st.session_state.thread_id:
-            st.metric("Assistant Thread", "✅ Created")
     else:
         st.info("Upload a file to see statistics")
 
-# Floating Chat Widget - Enhanced for Assistant API with actual chat
-if st.session_state.conversion_results and st.session_state.thread_id and st.session_state.assistant_id:
+# Floating Chat Widget - Enhanced for Assistant API
+if st.session_state.conversion_results and st.session_state.thread_id:
     project_name = st.session_state.project_info.get('project_name', 'this project') if st.session_state.project_info else 'this project'
     thread_id = st.session_state.thread_id
-    
-    # Initialize chat messages in session state
-    if 'floating_chat_messages' not in st.session_state:
-        st.session_state.floating_chat_messages = []
-    if 'floating_chat_open' not in st.session_state:
-        st.session_state.floating_chat_open = False
-    
-    # Toggle chat widget
-    if st.button("💬 Chat with Dedicated Assistant", help=f"Your personal AI assistant for {project_name} with code interpreter"):
-        st.session_state.floating_chat_open = not st.session_state.floating_chat_open
-    
-    # Show chat interface if open
-    if st.session_state.floating_chat_open:
-        st.markdown("### 🤖 Dedicated Assistant Chat")
-        st.write(f"**Assistant ID:** `{st.session_state.assistant_id}`")
-        st.write(f"**Thread ID:** `{thread_id}`")
-        st.write(f"**Project:** {project_name}")
-        st.info("💡 This assistant can run Python code on your Excel data for detailed analysis!")
-        
-        # Display chat messages
-        chat_container = st.container()
-        with chat_container:
-            for message in st.session_state.floating_chat_messages:
-                if message['role'] == 'user':
-                    st.markdown(f"**You:** {message['content']}")
-                else:
-                    st.markdown(f"**Assistant:** {message['content']}")
-        
-        # Chat input
-        user_message = st.text_input("Ask about your project...", key="floating_chat_input", placeholder="e.g., What is the total cost in this estimate?")
-        
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            if st.button("Send", key="send_chat"):
-                if user_message.strip():
-                    # Add user message to chat
-                    st.session_state.floating_chat_messages.append({
-                        'role': 'user',
-                        'content': user_message
-                    })
-                    
-                    try:
-                        # Create message in the thread
-                        client.beta.threads.messages.create(
-                            thread_id=thread_id,
-                            role="user",
-                            content=user_message
-                        )
-                        
-                        # Run the assistant
-                        run = client.beta.threads.runs.create(
-                            thread_id=thread_id,
-                            assistant_id=st.session_state.assistant_id
-                        )
-                        
-                        # Wait for completion (simple polling)
-                        with st.spinner("Assistant is thinking..."):
-                            while run.status in ['queued', 'in_progress']:
-                                time.sleep(1)
-                                run = client.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
-                        
-                        if run.status == 'completed':
-                            # Get the assistant's response
-                            messages = client.beta.threads.messages.list(thread_id=thread_id)
-                            assistant_message = messages.data[0].content[0].text.value
-                            
-                            st.session_state.floating_chat_messages.append({
-                                'role': 'assistant', 
-                                'content': assistant_message
-                            })
-                            st.rerun()
-                        else:
-                            st.error(f"Assistant run failed with status: {run.status}")
-                            
-                    except Exception as e:
-                        st.error(f"Chat error: {str(e)}")
-                        st.session_state.floating_chat_messages.append({
-                            'role': 'assistant',
-                            'content': f"Sorry, I encountered an error: {str(e)}"
-                        })
-        
-        with col2:
-            if st.button("Close Chat", key="close_chat"):
-                st.session_state.floating_chat_open = False
-                st.rerun()
-    
-    # Also add thread info in sidebar
-    with st.sidebar:
-        st.markdown("### 🤖 Dedicated Assistant")
-        st.code(f"Assistant ID: {st.session_state.assistant_id}")
-        st.code(f"Thread ID: {thread_id}")
-        st.write(f"📁 File attached: {st.session_state.project_info.get('file_name', 'Excel file')}")
-        st.write("🔧 **Tools:** Code Interpreter (can run Python on your Excel data)")
-        if st.session_state.vector_upload_success:
-            st.success("✅ Also available in main vector store")
-        else:
-            st.warning("⚠️ Vector store upload failed")
+    st.markdown(f"""
+    <div class="floating-chat" onclick="alert('Thread ID: {thread_id} | Navigate to Chat page to ask questions about {project_name} using this thread!')">
+        💬 Chat about {project_name}... (Thread: {thread_id[:8]}...)
+    </div>
+    """, unsafe_allow_html=True)
 
 elif st.session_state.conversion_results:
     project_name = st.session_state.project_info.get('project_name', 'this project') if st.session_state.project_info else 'this project'
@@ -823,21 +682,29 @@ with st.sidebar:
         st.session_state.processing_status = 'ready'
         st.session_state.conversion_results = []
         st.session_state.project_info = None
-        st.session_state.assistant_id = None
         st.session_state.thread_id = None
         st.session_state.file_id = None
         st.session_state.markdown_content = None
         st.session_state.vector_upload_success = False
-        st.session_state.floating_chat_messages = []
-        st.session_state.floating_chat_open = False
         st.rerun()
+    
+    # Assistant Thread Info
+    if st.session_state.thread_id:
+        st.markdown("---")
+        st.markdown("### 🤖 Assistant Thread")
+        st.code(f"Thread ID: {st.session_state.thread_id}")
+        st.write(f"📁 File attached: {st.session_state.project_info.get('file_name', 'Excel file')}")
+        if st.session_state.vector_upload_success:
+            st.success("✅ Also available in main vector store")
+        else:
+            st.warning("⚠️ Vector store upload failed")
     
     st.markdown("---")
     st.markdown("### 📈 Usage Stats")
     st.metric("Files Processed Today", "12")
     st.metric("Total Conversions", "1,247")
-    st.metric("Average Processing Time", "2.1s")
+    st.metric("Average Processing Time", "Real-time")
     
     st.markdown("---")
     st.markdown("### ℹ️ About")
-    st.info("AccuBid Document Converter transforms electrical estimation files into professional documents using AI-powered formatting and Assistant API integration with real-time chat capabilities.")
+    st.info("AccuBid Document Converter transforms electrical estimation files into professional documents using AI-powered formatting and Assistant API integration.")

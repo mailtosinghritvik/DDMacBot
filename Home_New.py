@@ -6,6 +6,46 @@ from openai import OpenAI
 import pandas as pd
 import tempfile
 
+# Load environment variables from env.txt file
+def load_env_from_file(filename='env.txt'):
+    """Load environment variables from a text file"""
+    if os.path.exists(filename):
+        with open(filename, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    os.environ[key] = value
+
+# Load environment variables
+load_env_from_file()
+
+# Check Excel engines availability
+def check_excel_engines():
+    """Check which Excel engines are available"""
+    engines_status = {}
+    try:
+        import openpyxl
+        engines_status['openpyxl'] = True
+    except ImportError:
+        engines_status['openpyxl'] = False
+    
+    try:
+        import xlrd
+        engines_status['xlrd'] = True
+    except ImportError:
+        engines_status['xlrd'] = False
+    
+    try:
+        import odf
+        engines_status['odf'] = True
+    except ImportError:
+        engines_status['odf'] = False
+    
+    return engines_status
+
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -24,11 +64,80 @@ st.set_page_config(
 def process_excel_file(file):
     """Process Excel file and return sheet data"""
     try:
-        xls = pd.ExcelFile(file)
+        # Get file information for debugging
+        file_extension = file.name.lower()
+        file_size = len(file.getbuffer())
+        
+        st.info(f"Processing file: {file.name} (Size: {file_size} bytes, Extension: {file_extension})")
+        
+        # Check if file is empty
+        if file_size == 0:
+            raise Exception("File is empty")
+        
+        # Try to determine the file format and use appropriate engine
+        if file_extension.endswith('.xlsx'):
+            engine = 'openpyxl'
+        elif file_extension.endswith('.xls'):
+            engine = 'xlrd'
+        elif file_extension.endswith('.xlsm'):
+            engine = 'openpyxl'
+        elif file_extension.endswith('.csv'):
+            # Handle CSV files
+            try:
+                df = pd.read_csv(file)
+                return {'Sheet1': df}, ['Sheet1']
+            except Exception as csv_error:
+                raise Exception(f"Error reading CSV file: {str(csv_error)}")
+        else:
+            # Try to auto-detect, but provide fallback engines
+            engine = None
+        
+        # Try with auto-detection first
+        xls = None
+        error_messages = []
+        
+        try:
+            xls = pd.ExcelFile(file, engine=engine)
+            st.success(f"Successfully opened file with engine: {xls.engine}")
+        except Exception as e:
+            error_messages.append(f"Auto-detection failed: {str(e)}")
+            
+            # If auto-detection fails, try different engines
+            engines_to_try = ['openpyxl', 'xlrd', 'odf']
+            
+            for eng in engines_to_try:
+                try:
+                    st.info(f"Trying engine: {eng}")
+                    xls = pd.ExcelFile(file, engine=eng)
+                    st.success(f"Successfully opened file with engine: {eng}")
+                    break
+                except Exception as eng_error:
+                    error_messages.append(f"{eng} failed: {str(eng_error)}")
+                    continue
+            
+            if xls is None:
+                error_summary = "\n".join(error_messages)
+                raise Exception(f"Could not read Excel file with any available engine.\n\nError details:\n{error_summary}")
+        
+        # Check if file has any sheets
+        if not xls.sheet_names:
+            raise Exception("Excel file contains no sheets")
+        
+        st.info(f"Found {len(xls.sheet_names)} sheet(s): {', '.join(xls.sheet_names)}")
+        
         sheet_data = {}
         for sheet_name in xls.sheet_names:
-            df = pd.read_excel(xls, sheet_name=sheet_name)
-            sheet_data[sheet_name] = df
+            try:
+                df = pd.read_excel(xls, sheet_name=sheet_name, engine=xls.engine)
+                sheet_data[sheet_name] = df
+                st.success(f"Successfully read sheet: {sheet_name} ({len(df)} rows, {len(df.columns)} columns)")
+            except Exception as sheet_error:
+                st.warning(f"Warning: Could not read sheet '{sheet_name}': {str(sheet_error)}")
+                continue
+        
+        if not sheet_data:
+            raise Exception("No sheets could be read from the Excel file")
+            
         return sheet_data, xls.sheet_names
     except Exception as e:
         st.error(f"Error processing Excel file: {str(e)}")
@@ -327,6 +436,16 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# Check and display Excel engine status
+engines_status = check_excel_engines()
+missing_engines = [eng for eng, available in engines_status.items() if not available]
+
+if missing_engines:
+    st.warning(f"⚠️ Missing Excel engines: {', '.join(missing_engines)}")
+    st.info("💡 Install missing engines: `pip install {' '.join(missing_engines)}`")
+else:
+    st.success("✅ All Excel engines available")
+
 # Main content area
 col1, col2 = st.columns([2, 1])
 
@@ -440,7 +559,7 @@ with col1:
                     if not sheet_data:
                         st.error("Failed to process Excel file")
                         st.session_state.processing_status = 'error'
-                        st.rerun()
+                        #st.rerun()
 
                 # Step 2: Collect sheet information
                 st.markdown("### 📋 Sheet Context Required")

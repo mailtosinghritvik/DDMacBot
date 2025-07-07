@@ -28,17 +28,34 @@ def process_excel_file(file):
         return None, []
 
 def collect_sheet_info_simple(sheet_names):
-    """Collect sheet information with simple UI"""
+    """Collect sheet information with simple UI and store in session state"""
     sheet_info = {}
+    
     for sheet_name in sheet_names:
         col1, col2 = st.columns(2)
         with col1:
-            meaning = st.text_input(f"What is '{sheet_name}'?", key=f"meaning_{sheet_name}", 
+            # Use session state to maintain values across reruns
+            default_meaning = st.session_state.sheet_info.get(sheet_name, {}).get('meaning', '')
+            meaning = st.text_input(f"What is '{sheet_name}'?", 
+                                   value=default_meaning,
+                                   key=f"meaning_{sheet_name}", 
                                    placeholder="e.g., Material costs, Labor hours...")
         with col2:
-            description = st.text_input(f"Description of '{sheet_name}'", key=f"desc_{sheet_name}",
+            # Use session state to maintain values across reruns
+            default_description = st.session_state.sheet_info.get(sheet_name, {}).get('description', '')
+            description = st.text_input(f"Description of '{sheet_name}'", 
+                                       value=default_description,
+                                       key=f"desc_{sheet_name}",
                                        placeholder="e.g., Detailed material breakdown...")
+        
         sheet_info[sheet_name] = {"meaning": meaning, "description": description}
+        
+        # Store in session state immediately
+        if sheet_name not in st.session_state.sheet_info:
+            st.session_state.sheet_info[sheet_name] = {}
+        st.session_state.sheet_info[sheet_name]['meaning'] = meaning
+        st.session_state.sheet_info[sheet_name]['description'] = description
+    
     return sheet_info
 
 def generate_markdown_from_excel(sheet_data, sheet_info, project_info):
@@ -354,6 +371,10 @@ if 'floating_chat_messages' not in st.session_state:
     st.session_state.floating_chat_messages = []
 if 'floating_chat_open' not in st.session_state:
     st.session_state.floating_chat_open = False
+if 'sheet_info' not in st.session_state:
+    st.session_state.sheet_info = {}
+if 'sheet_names' not in st.session_state:
+    st.session_state.sheet_names = []
 
 # Header
 st.markdown("""
@@ -471,24 +492,28 @@ with col1:
             st.markdown('<div class="status-indicator status-processing">🤖 AI Processing Pipeline Active...</div>', unsafe_allow_html=True)
             
             try:
-                # Step 1: Parse Excel file
+                # Step 1: Parse Excel file and store sheet names
                 with st.spinner("📊 Parsing AccuBid Excel data structure..."):
                     sheet_data, sheet_names = process_excel_file(st.session_state.uploaded_file)
                     if not sheet_data:
                         st.error("Failed to process Excel file")
                         st.session_state.processing_status = 'error'
                         st.rerun()
+                    
+                    # Store sheet names in session state
+                    st.session_state.sheet_names = sheet_names
 
                 # Step 2: Collect sheet information
                 st.markdown("### 📋 Sheet Context Required")
                 st.write("Please provide context for each sheet in your Excel file:")
                 
-                sheet_info = collect_sheet_info_simple(sheet_names)
+                sheet_info = collect_sheet_info_simple(st.session_state.sheet_names)
                 
-                # Check if all sheet info is provided
+                # Check if all sheet info is provided using session state data
                 all_info_provided = all(
-                    info['meaning'].strip() and info['description'].strip() 
-                    for info in sheet_info.values()
+                    st.session_state.sheet_info.get(sheet_name, {}).get('meaning', '').strip() and 
+                    st.session_state.sheet_info.get(sheet_name, {}).get('description', '').strip()
+                    for sheet_name in st.session_state.sheet_names
                 )
                 
                 if not all_info_provided:
@@ -514,11 +539,11 @@ with col1:
                             st.session_state.processing_status = 'error'
                             st.rerun()
                         
-                        # Step 4: Generate markdown document
+                        # Step 4: Generate markdown document using session state data
                         progress_bar.progress(50)
                         status_text.text('📝 Creating comprehensive markdown document...')
                         markdown_content = generate_markdown_from_excel(
-                            sheet_data, sheet_info, st.session_state.project_info
+                            sheet_data, st.session_state.sheet_info, st.session_state.project_info
                         )
                         
                         # Step 5: Upload to vector store
@@ -830,6 +855,8 @@ with st.sidebar:
         st.session_state.vector_upload_success = False
         st.session_state.floating_chat_messages = []
         st.session_state.floating_chat_open = False
+        st.session_state.sheet_info = {}
+        st.session_state.sheet_names = []
         st.rerun()
     
     st.markdown("---")

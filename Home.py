@@ -9,9 +9,16 @@ import tempfile
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Configuration - Update these with your actual IDs
-VECTOR_STORE_ID = 'vs_qUspcB7VllWXM4z7aAEdIK9L'  # Replace with your actual vector store ID
-ASSISTANT_ID = 'asst_Wk1Ue0iDYkhbdiXXDPPJsvAV'  # Replace with your actual assistant ID
+# Vector Store ID for main RAG system (replace with your actual vector store ID)
+VECTOR_STORE_ID = 'vs_qUspcB7VllWXM4z7aAEdIK9L'
+
+# Set page configuration
+st.set_page_config(
+    page_title="AccuBid Converter",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # Assistant Helper Functions
 def process_excel_file(file):
@@ -188,6 +195,10 @@ def generate_markdown_from_excel(sheet_data, sheet_info, project_info):
 def upload_to_vector_store(markdown_content, filename):
     """Upload markdown content to vector store"""
     try:
+        # Debug: Check if vector store ID is set
+        if not VECTOR_STORE_ID:
+            return False, "❌ Vector Store ID not configured"
+            
         with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as temp_file:
             temp_file.write(markdown_content)
             temp_file_path = temp_file.name
@@ -208,9 +219,14 @@ def upload_to_vector_store(markdown_content, filename):
     except Exception as e:
         return False, f"Error uploading to vector store: {str(e)}"
 
-def create_assistant_with_excel(uploaded_file, project_info):
-    """Create a new Assistant with code_interpreter and attach the Excel file"""
+def create_assistant_thread_with_excel(uploaded_file):
+    """Create a new Assistant with code interpreter and upload the Excel file to it"""
     try:
+        # Debug: Check OpenAI API key
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return None, None, None, "❌ OpenAI API key not found in environment variables"
+        
         # Save Excel file temporarily
         temp_path = os.path.join(tempfile.gettempdir(), uploaded_file.name)
         with open(temp_path, "wb") as f:
@@ -227,23 +243,13 @@ def create_assistant_with_excel(uploaded_file, project_info):
         os.remove(temp_path)
         
         # Create a new Assistant with code_interpreter and the Excel file
+        project_info = st.session_state.project_info
         assistant_name = f"DDMac Bot - {project_info.get('project_name', 'Project')} Analyzer"
-        assistant_description = f"""You are DDMac Bot, an expert assistant for analyzing electrical estimation and project spreadsheets. 
+        assistant_description = f"""DDMac Bot expert for electrical estimation analysis.
 
-Project Context:
-- Company: {project_info.get('company_name', 'Unknown')}
-- Project: {project_info.get('project_name', 'Unknown')}
-- Type: {project_info.get('project_type', 'Unknown')}
-- Location: {project_info.get('project_location', 'Not specified')}
+Project: {project_info.get('project_name', 'Unknown')} | Company: {project_info.get('company_name', 'Unknown')} | Type: {project_info.get('project_type', 'Unknown')}
 
-Your role is to:
-1. Analyze the uploaded Excel/CSV file in great detail
-2. Provide comprehensive answers about costs, materials, labor, timelines
-3. Generate summaries, charts, and data visualizations when requested
-4. Help users understand project scope, budgets, and technical details
-5. Identify trends, anomalies, or optimization opportunities in the data
-
-Always provide detailed, professional responses with specific data points, calculations, and actionable insights."""
+Analyzes Excel data for costs, materials, labor, timelines. Provides detailed answers, summaries, charts, and identifies optimization opportunities. Uses code interpreter for calculations and visualizations."""
         
         assistant = client.beta.assistants.create(
             name=assistant_name,
@@ -260,18 +266,10 @@ Always provide detailed, professional responses with specific data points, calcu
         # Create a thread for this assistant
         thread = client.beta.threads.create()
         
-        return assistant.id, thread.id, file_obj.id, "Assistant and thread created successfully"
+        return thread.id, file_obj.id, assistant.id, "Assistant and thread created successfully"
         
     except Exception as e:
         return None, None, None, f"Error creating assistant: {str(e)}"
-
-# Set page configuration
-st.set_page_config(
-    page_title="AccuBid Converter",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Custom CSS for better styling
 st.markdown("""
@@ -310,23 +308,25 @@ st.markdown("""
     }
     
     .result-card {
-        background: #f8f9fa;
+        background: white;
         padding: 1.5rem;
         border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         margin: 1rem 0;
-        border: 1px solid #dee2e6;
+        border-left: 4px solid #28a745;
     }
     
     .floating-chat {
         position: fixed;
         bottom: 20px;
         right: 20px;
-        background: #1f4e79;
+        background: linear-gradient(90deg, #1f4e79 0%, #2e7d32 100%);
         color: white;
-        padding: 12px 20px;
+        padding: 15px 25px;
         border-radius: 25px;
         cursor: pointer;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        font-weight: bold;
         z-index: 1000;
     }
     
@@ -356,31 +356,33 @@ if 'project_info' not in st.session_state:
     st.session_state.project_info = None
 if 'chat_open' not in st.session_state:
     st.session_state.chat_open = False
-# New session state for Assistant API integration
+# Assistant API integration session state
 if 'thread_id' not in st.session_state:
     st.session_state.thread_id = None
-if 'assistant_id' not in st.session_state:
-    st.session_state.assistant_id = None
 if 'file_id' not in st.session_state:
     st.session_state.file_id = None
 if 'markdown_content' not in st.session_state:
     st.session_state.markdown_content = None
 if 'vector_upload_success' not in st.session_state:
     st.session_state.vector_upload_success = False
-if 'floating_chat_messages' not in st.session_state:
-    st.session_state.floating_chat_messages = []
-if 'floating_chat_open' not in st.session_state:
-    st.session_state.floating_chat_open = False
 if 'sheet_info' not in st.session_state:
     st.session_state.sheet_info = {}
 if 'sheet_names' not in st.session_state:
     st.session_state.sheet_names = []
+if 'proceed_with_processing' not in st.session_state:
+    st.session_state.proceed_with_processing = False
+if 'floating_chat_open' not in st.session_state:
+    st.session_state.floating_chat_open = False
+if 'floating_chat_messages' not in st.session_state:
+    st.session_state.floating_chat_messages = []
+if 'assistant_id' not in st.session_state:
+    st.session_state.assistant_id = None
 
 # Header
 st.markdown("""
 <div class="main-header">
     <h1>⚡ AccuBid Document Converter</h1>
-    <p>Transform your AccuBid files into professional Word documents and PDFs</p>
+    <p>Transform your AccuBid files with AI-powered analysis and Assistant API integration</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -485,65 +487,57 @@ with col1:
                     st.session_state.processing_status = 'processing'
                     st.rerun()
     
-    # Processing Status
     # REAL PROCESSING IMPLEMENTATION
     if st.session_state.uploaded_file and hasattr(st.session_state, 'project_info'):
         if st.session_state.processing_status == 'processing':
             st.markdown('<div class="status-indicator status-processing">🤖 AI Processing Pipeline Active...</div>', unsafe_allow_html=True)
             
-            try:
-                # Step 1: Parse Excel file and store sheet names
-                with st.spinner("📊 Parsing AccuBid Excel data structure..."):
-                    sheet_data, sheet_names = process_excel_file(st.session_state.uploaded_file)
-                    if not sheet_data:
-                        st.error("Failed to process Excel file")
-                        st.session_state.processing_status = 'error'
-                        st.rerun()
-                    
-                    # Store sheet names in session state
-                    st.session_state.sheet_names = sheet_names
+            # Step 1: Parse Excel file
+            with st.spinner("📊 Parsing AccuBid Excel data structure..."):
+                sheet_data, sheet_names = process_excel_file(st.session_state.uploaded_file)
+                if not sheet_data:
+                    st.error("Failed to process Excel file")
+                    st.session_state.processing_status = 'error'
+                    st.stop()
 
-                # Step 2: Collect sheet information
-                st.markdown("### 📋 Sheet Context Required")
-                st.write("Please provide context for each sheet in your Excel file:")
-                
-                sheet_info = collect_sheet_info_simple(st.session_state.sheet_names)
-                
-                # Check if all sheet info is provided using session state data
-                all_info_provided = all(
-                    st.session_state.sheet_info.get(sheet_name, {}).get('meaning', '').strip() and 
-                    st.session_state.sheet_info.get(sheet_name, {}).get('description', '').strip()
-                    for sheet_name in st.session_state.sheet_names
-                )
-                
-                if not all_info_provided:
-                    st.warning("⚠️ Please provide meaning and description for all sheets before continuing.")
-                    if st.button("⏹️ Cancel Processing"):
-                        st.session_state.processing_status = 'ready'
-                        st.rerun()
-                else:
-                    if st.button("� Continue with AI Processing", type="primary"):
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        
-                        # Step 3: Create new Assistant with code_interpreter and Excel file
+                # Store sheet names in session state
+                st.session_state.sheet_names = sheet_names
+
+            # ...existing code...
+
+                # Check if processing button was clicked and all sheet info is available
+                if st.session_state.get('proceed_with_processing', False):
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    try:
+                        # Step 3: Create Assistant with code_interpreter and Excel file
                         progress_bar.progress(20)
                         status_text.text('🤖 Creating dedicated AI assistant with code interpreter for your Excel data...')
-                        assistant_id, thread_id, file_id, assistant_msg = create_assistant_with_excel(
-                            st.session_state.uploaded_file, 
-                            st.session_state.project_info
-                        )
+                        thread_id, file_id, assistant_id, assistant_msg = create_assistant_thread_with_excel(st.session_state.uploaded_file)
                         
-                        if not assistant_id:
-                            st.error(f"Failed to create assistant: {assistant_msg}")
+                        if not thread_id:
+                            st.error(f"❌ Assistant Creation Failed: {assistant_msg}")
+                            st.error("🔍 Check your OpenAI API key and permissions")
                             st.session_state.processing_status = 'error'
-                            st.rerun()
+                            st.session_state.proceed_with_processing = False
+                            st.stop()
                         
                         # Step 4: Generate markdown document using session state data
                         progress_bar.progress(50)
                         status_text.text('📝 Creating comprehensive markdown document...')
+                        
+                        # Use sheet info from session state for processing
+                        session_sheet_info = {
+                            sheet_name: {
+                                'meaning': st.session_state.sheet_info.get(sheet_name, {}).get('meaning', ''),
+                                'description': st.session_state.sheet_info.get(sheet_name, {}).get('description', '')
+                            }
+                            for sheet_name in st.session_state.sheet_names
+                        }
+                        
                         markdown_content = generate_markdown_from_excel(
-                            sheet_data, st.session_state.sheet_info, st.session_state.project_info
+                            sheet_data, session_sheet_info, st.session_state.project_info
                         )
                         
                         # Step 5: Upload to vector store
@@ -555,17 +549,18 @@ with col1:
                         )
                         
                         if not upload_success:
-                            st.warning(f"Vector store upload failed: {upload_msg}")
+                            st.warning(f"⚠️ Vector Store Upload Failed: {upload_msg}")
+                            st.warning("🔍 Check your Vector Store ID and API permissions")
                         
-                        # Step 6: Complete processing
+                        # Step 6: Complete processing - ONLY clear flag on success
                         progress_bar.progress(100)
                         status_text.text('✅ Processing complete! Ready for chat and document generation...')
                         time.sleep(1)
                         
                         # Store results
-                        st.session_state.assistant_id = assistant_id
                         st.session_state.thread_id = thread_id
                         st.session_state.file_id = file_id
+                        st.session_state.assistant_id = assistant_id
                         st.session_state.markdown_content = markdown_content
                         st.session_state.vector_upload_success = upload_success
                         
@@ -593,14 +588,43 @@ with col1:
                             }
                         ]
                         
+                        # Clear the flag only on successful completion
+                        st.session_state.proceed_with_processing = False
                         st.session_state.processing_status = 'complete'
                         st.rerun()
                         
-            except Exception as e:
-                st.error(f"Processing failed: {str(e)}")
-                st.session_state.processing_status = 'error'
-                st.rerun()
-            
+                    except Exception as e:
+                        st.error(f"❌ Processing Failed: {str(e)}")
+                        st.error("🔍 Check your OpenAI API key, Vector Store ID, and network connection")
+                        st.session_state.processing_status = 'error'
+                        st.session_state.proceed_with_processing = False
+                        st.stop()
+                
+                else:
+                    # Step 2: Collect sheet information only if processing hasn't been triggered
+                    st.markdown("### 📋 Sheet Context Required")
+                    st.write("Please provide context for each sheet in your Excel file:")
+                    
+                    sheet_info = collect_sheet_info_simple(st.session_state.sheet_names)
+                    
+                    # Check if all sheet info is provided using session state data
+                    all_info_provided = all(
+                        st.session_state.sheet_info.get(sheet_name, {}).get('meaning', '').strip() and 
+                        st.session_state.sheet_info.get(sheet_name, {}).get('description', '').strip()
+                        for sheet_name in st.session_state.sheet_names
+                    )
+                    
+                    if not all_info_provided:
+                        st.warning("⚠️ Please provide meaning and description for all sheets before continuing.")
+                        if st.button("⏹️ Cancel Processing"):
+                            st.session_state.processing_status = 'ready'
+                            st.rerun()
+                    else:
+                        if st.button("🚀 Continue with AI Processing", type="primary"):
+                            # Set flag to proceed with processing on next rerun
+                            st.session_state.proceed_with_processing = True
+                            st.rerun()
+                
         elif st.session_state.processing_status == 'complete':
             st.markdown('<div class="status-indicator status-complete">🎉 AI Enhancement Complete!</div>', unsafe_allow_html=True)
             
@@ -639,25 +663,23 @@ with col1:
                     col_a, col_b = st.columns(2)
                     with col_a:
                         if st.button(f"📄 View Markdown", key=f"view_{result['type']}", use_container_width=True):
-                            if hasattr(st.session_state, 'markdown_content') and st.session_state.markdown_content:
-                                st.markdown("### 📄 Generated Markdown Content")
-                                st.markdown("```markdown")
-                                st.text(st.session_state.markdown_content[:2000] + "..." if len(st.session_state.markdown_content) > 2000 else st.session_state.markdown_content)
-                                st.markdown("```")
+                            if st.session_state.markdown_content:
+                                with st.expander("📄 Generated Markdown Content", expanded=True):
+                                    st.markdown(st.session_state.markdown_content)
                             else:
-                                st.warning("Markdown content not available")
+                                st.info("Markdown content not available")
                     with col_b:
                         if st.button(f"⬇️ Download Markdown", key=f"download_{result['type']}", use_container_width=True):
-                            if hasattr(st.session_state, 'markdown_content') and st.session_state.markdown_content:
+                            if st.session_state.markdown_content:
                                 st.download_button(
                                     label="💾 Download Markdown File",
                                     data=st.session_state.markdown_content,
-                                    file_name=result['filename'],
+                                    file_name=f"{st.session_state.project_info['company_name']}_{st.session_state.project_info['project_name']}_enhanced.md",
                                     mime="text/markdown",
-                                    key=f"download_markdown_{result['type']}"
+                                    key=f"download_md_{result['type']}"
                                 )
                             else:
-                                st.warning("Markdown content not available for download")
+                                st.info("Markdown content not available")
                 
                 elif result['type'] == "RAG Vector Store Entry":
                     col_a, col_b = st.columns(2)
@@ -677,10 +699,6 @@ with col1:
                         if st.button(f"📋 Copy Assistant ID", key=f"copy_{result['type']}", use_container_width=True):
                             st.code(st.session_state.assistant_id)
                             st.success("Assistant ID displayed above - copy manually")
-                
-                elif result['type'] == "Dashboard Entry":
-                    if st.button(f"📊 View in Dashboard", key=f"dashboard_{result['type']}", use_container_width=True):
-                        st.info("🚀 Navigate to the Dashboard page to see project analytics!")
 
 with col2:
     # Quick Actions Panel
@@ -693,16 +711,16 @@ with col2:
     if st.session_state.conversion_results:
         st.markdown("**🎯 What you can do now:**")
         
-        if st.button("� Start Chatting", use_container_width=True):
+        if st.button("💬 Start Chatting", use_container_width=True):
             st.info("Navigate to Chat page to ask questions about your project")
         
         if st.button("📄 Generate Documents", use_container_width=True):
             st.info("Use chat to request Word docs, PDFs, or custom reports")
         
-        if st.button("� Email Stakeholders", use_container_width=True):
+        if st.button("📧 Email Results", use_container_width=True):
             st.success("Email integration will be implemented in backend phase")
         
-        if st.button("� Schedule Meeting", use_container_width=True):
+        if st.button("📅 Schedule Meeting", use_container_width=True):
             st.success("Calendar integration will be implemented in backend phase")
         
         if st.button("🔗 Share Link", use_container_width=True):
@@ -724,21 +742,12 @@ with col2:
             st.metric("Vector Store", "✅ Uploaded")
         elif st.session_state.processing_status == 'complete':
             st.metric("Vector Store", "❌ Failed")
-        if st.session_state.thread_id:
-            st.metric("Assistant Thread", "✅ Created")
     else:
         st.info("Upload a file to see statistics")
 
 # Floating Chat Widget - Enhanced for Assistant API with actual chat
 if st.session_state.conversion_results and st.session_state.thread_id and st.session_state.assistant_id:
     project_name = st.session_state.project_info.get('project_name', 'this project') if st.session_state.project_info else 'this project'
-    thread_id = st.session_state.thread_id
-    
-    # Initialize chat messages in session state
-    if 'floating_chat_messages' not in st.session_state:
-        st.session_state.floating_chat_messages = []
-    if 'floating_chat_open' not in st.session_state:
-        st.session_state.floating_chat_open = False
     
     # Toggle chat widget
     if st.button("💬 Chat with Dedicated Assistant", help=f"Your personal AI assistant for {project_name} with code interpreter"):
@@ -748,7 +757,7 @@ if st.session_state.conversion_results and st.session_state.thread_id and st.ses
     if st.session_state.floating_chat_open:
         st.markdown("### 🤖 Dedicated Assistant Chat")
         st.write(f"**Assistant ID:** `{st.session_state.assistant_id}`")
-        st.write(f"**Thread ID:** `{thread_id}`")
+        st.write(f"**Thread ID:** `{st.session_state.thread_id}`")
         st.write(f"**Project:** {project_name}")
         st.info("💡 This assistant can run Python code on your Excel data for detailed analysis!")
         
@@ -760,6 +769,17 @@ if st.session_state.conversion_results and st.session_state.thread_id and st.ses
                     st.markdown(f"**You:** {message['content']}")
                 else:
                     st.markdown(f"**Assistant:** {message['content']}")
+                    
+                    # Display any images generated by Code Interpreter
+                    if message.get('images'):
+                        for image_file_id in message['images']:
+                            try:
+                                # Download and display the image
+                                image_data = client.files.content(image_file_id)
+                                image_bytes = image_data.read()
+                                st.image(image_bytes, caption=f"Generated by Code Interpreter", use_column_width=True)
+                            except Exception as img_error:
+                                st.error(f"Could not display image {image_file_id}: {str(img_error)}")
         
         # Chat input
         user_message = st.text_input("Ask about your project...", key="floating_chat_input", placeholder="e.g., What is the total cost in this estimate?")
@@ -777,14 +797,14 @@ if st.session_state.conversion_results and st.session_state.thread_id and st.ses
                     try:
                         # Create message in the thread
                         client.beta.threads.messages.create(
-                            thread_id=thread_id,
+                            thread_id=st.session_state.thread_id,
                             role="user",
                             content=user_message
                         )
                         
                         # Run the assistant
                         run = client.beta.threads.runs.create(
-                            thread_id=thread_id,
+                            thread_id=st.session_state.thread_id,
                             assistant_id=st.session_state.assistant_id
                         )
                         
@@ -792,17 +812,34 @@ if st.session_state.conversion_results and st.session_state.thread_id and st.ses
                         with st.spinner("Assistant is thinking..."):
                             while run.status in ['queued', 'in_progress']:
                                 time.sleep(1)
-                                run = client.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
+                                run = client.beta.threads.runs.retrieve(thread_id=st.session_state.thread_id, run_id=run.id)
                         
-                        if run.status == 'completed':
+                        if run.status == 'completed': 
                             # Get the assistant's response
-                            messages = client.beta.threads.messages.list(thread_id=thread_id)
-                            assistant_message = messages.data[0].content[0].text.value
+                            messages = client.beta.threads.messages.list(thread_id=st.session_state.thread_id)
                             
-                            st.session_state.floating_chat_messages.append({
+                            # Process the message content - handle both text and images
+                            assistant_content = ""
+                            images = []
+                            
+                            for content_block in messages.data[0].content:
+                                if hasattr(content_block, 'text'):
+                                    # Text content
+                                    assistant_content += content_block.text.value + "\n"
+                                elif hasattr(content_block, 'image_file'):
+                                    # Image content from Code Interpreter
+                                    file_id = content_block.image_file.file_id
+                                    images.append(file_id)
+                                    assistant_content += f"[Generated Image: file-{file_id}]\n"
+                            
+                            # Store the message with both text and image info
+                            message_data = {
                                 'role': 'assistant', 
-                                'content': assistant_message
-                            })
+                                'content': assistant_content.strip(),
+                                'images': images if images else None
+                            }
+                            
+                            st.session_state.floating_chat_messages.append(message_data)
                             st.rerun()
                         else:
                             st.error(f"Assistant run failed with status: {run.status}")
@@ -818,18 +855,6 @@ if st.session_state.conversion_results and st.session_state.thread_id and st.ses
             if st.button("Close Chat", key="close_chat"):
                 st.session_state.floating_chat_open = False
                 st.rerun()
-    
-    # Also add thread info in sidebar
-    with st.sidebar:
-        st.markdown("### 🤖 Dedicated Assistant")
-        st.code(f"Assistant ID: {st.session_state.assistant_id}")
-        st.code(f"Thread ID: {thread_id}")
-        st.write(f"📁 File attached: {st.session_state.project_info.get('file_name', 'Excel file')}")
-        st.write("🔧 **Tools:** Code Interpreter (can run Python on your Excel data)")
-        if st.session_state.vector_upload_success:
-            st.success("✅ Also available in main vector store")
-        else:
-            st.warning("⚠️ Vector store upload failed")
 
 elif st.session_state.conversion_results:
     project_name = st.session_state.project_info.get('project_name', 'this project') if st.session_state.project_info else 'this project'
@@ -848,23 +873,37 @@ with st.sidebar:
         st.session_state.processing_status = 'ready'
         st.session_state.conversion_results = []
         st.session_state.project_info = None
-        st.session_state.assistant_id = None
         st.session_state.thread_id = None
         st.session_state.file_id = None
+        st.session_state.assistant_id = None
         st.session_state.markdown_content = None
         st.session_state.vector_upload_success = False
-        st.session_state.floating_chat_messages = []
-        st.session_state.floating_chat_open = False
         st.session_state.sheet_info = {}
         st.session_state.sheet_names = []
+        st.session_state.proceed_with_processing = False
+        st.session_state.floating_chat_open = False
+        st.session_state.floating_chat_messages = []
         st.rerun()
+    
+    # Assistant Thread Info
+    if st.session_state.thread_id and st.session_state.assistant_id:
+        st.markdown("---")
+        st.markdown("### 🤖 Dedicated Assistant")
+        st.code(f"Assistant ID: {st.session_state.assistant_id}")
+        st.code(f"Thread ID: {st.session_state.thread_id}")
+        st.write(f"📁 File attached: {st.session_state.project_info.get('file_name', 'Excel file')}")
+        st.write("🔧 **Tools:** Code Interpreter (can run Python on your Excel data)")
+        if st.session_state.vector_upload_success:
+            st.success("✅ Also available in main vector store")
+        else:
+            st.warning("⚠️ Vector store upload failed")
     
     st.markdown("---")
     st.markdown("### 📈 Usage Stats")
     st.metric("Files Processed Today", "12")
     st.metric("Total Conversions", "1,247")
-    st.metric("Average Processing Time", "2.1s")
+    st.metric("Average Processing Time", "Real-time")
     
     st.markdown("---")
     st.markdown("### ℹ️ About")
-    st.info("AccuBid Document Converter transforms electrical estimation files into professional documents using AI-powered formatting and Assistant API integration with real-time chat capabilities.")
+    st.info("AccuBid Document Converter transforms electrical estimation files into professional documents using AI-powered formatting and Assistant API integration.")

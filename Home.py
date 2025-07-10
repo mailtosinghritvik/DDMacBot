@@ -242,32 +242,14 @@ def create_assistant_thread_with_excel(uploaded_file):
         # Clean up temp file
         os.remove(temp_path)
         
-        # Upload proposal template DOCX file
-        template_file_obj = None
-        template_path = "/Users/ritviksingh/Desktop/Ace148/DDMacBot/resources/prompts/ddmac_template.docx"
-        if os.path.exists(template_path):
-            try:
-                with open(template_path, "rb") as f:
-                    template_file_obj = client.files.create(
-                        file=f,
-                        purpose='assistants'
-                    )
-            except Exception as template_error:
-                st.warning(f"Could not upload proposal template: {str(template_error)}")
-        
-        # Prepare file IDs for assistant
-        file_ids = [file_obj.id]
-        if template_file_obj:
-            file_ids.append(template_file_obj.id)
-        
-        # Create a new Assistant with code_interpreter and both files
+        # Create a new Assistant with code_interpreter and Excel file
         project_info = st.session_state.project_info
         assistant_name = f"DDMac Bot - {project_info.get('project_name', 'Project')} Analyzer"
-        assistant_description = f"""DDMac Bot expert for electrical estimation analysis and proposal generation.
+        assistant_description = f"""DDMac Bot expert for electrical estimation analysis.
 
 Project: {project_info.get('project_name', 'Unknown')} | Company: {project_info.get('company_name', 'Unknown')} | Type: {project_info.get('project_type', 'Unknown')}
 
-Analyzes Excel data for costs, materials, labor, timelines. Generates professional proposal documents using template. Uses code interpreter for calculations and document generation."""
+Analyzes Excel data for costs, materials, labor, timelines. Uses code interpreter for calculations and data analysis."""
         
         assistant = client.beta.assistants.create(
             name=assistant_name,
@@ -276,7 +258,7 @@ Analyzes Excel data for costs, materials, labor, timelines. Generates profession
             tools=[{"type": "code_interpreter"}],
             tool_resources={
                 "code_interpreter": {
-                    "file_ids": file_ids
+                    "file_ids": [file_obj.id]
                 }
             }
         )
@@ -288,158 +270,6 @@ Analyzes Excel data for costs, materials, labor, timelines. Generates profession
         
     except Exception as e:
         return None, None, None, f"Error creating assistant: {str(e)}"
-
-def generate_proposal_document():
-    """Generate a proposal document using the assistant with code interpreter and template"""
-    try:
-        if not st.session_state.assistant_id or not st.session_state.thread_id:
-            return None, "No assistant found. Please upload an Excel file first."
-        
-        # Get project and sheet info from session state
-        project_info = st.session_state.get('project_info', {})
-        sheet_info = st.session_state.get('sheet_info', {})
-        
-        # Create comprehensive project context
-        project_context = f"""
-PROJECT INFORMATION:
-- Company Name: {project_info.get('company_name', 'N/A')}
-- Project Name: {project_info.get('project_name', 'N/A')}
-- Project Type: {project_info.get('project_type', 'N/A')}
-- Location: {project_info.get('project_location', 'N/A')}
-- Contract Terms: {project_info.get('contract_terms', 'N/A')}
-- Additional Info: {project_info.get('additional_info', 'N/A')}
-
-EXCEL SHEET INFORMATION:
-"""
-        
-        # Add detailed sheet information
-        for sheet_name, info in sheet_info.items():
-            project_context += f"""
-Sheet: {sheet_name}
-- Purpose/Meaning: {info.get('meaning', 'N/A')}
-- Description: {info.get('description', 'N/A')}
-"""
-        
-        # Create the special prompt based on your specifications
-        prompt = f"""{project_context}
-
-TASK: Generate a professional electrical project proposal document using the provided ddmac_template.docx file.
-
-You have access to:
-1. An Excel file with project cost data and estimates
-2. A ddmac_template.docx file with specific tags to replace
-
-INSTRUCTIONS:
-Replace the following tags in the template with appropriate information from the Excel file and project data:
-
-INSERT_TO_COMPANY, INSERT_NAME_OF_PERSON, INSERT_PROJECT_NAME, DATE, EST, INSERT_ON_THE_BASIS_PARAGRAPH_HERE, INSERT_COST_ONE_NAME, INSERT_COST_ONE_VALUE, INSERT_COST_TWO_NAME, INSERT_COST_TWO_VALUE, PROJECT_ORGANISER_NAME, PROJECT_ORGANISER_TITLE, ITEM_NOT_INCLUDED_1, ITEM_NOT_INCLUDED_2, QUALIFICATION_1, QUALIFICATION_2.
-
-Wherever there is names of people or company required, or any non numerical data is required you can see above, But for cost one and cost two you will find the sale price or final cost from excel and populate all the above information in the word document. 
-
-ALL YOU have to do is to find it one by one in the docx, and replace it with what you think is right. do not change any other part of the document. find the numbers using excel attached.
-
-INSERT_COST_ONE_NAME, INSERT_COST_ONE_VALUE, INSERT_COST_TWO_NAME, INSERT_COST_TWO_VALUE - these tags are inside a table in the docx, so you will have to replace those too - with information most similar to the final most important costs data from the Excel file.
-SPECIFIC MAPPINGS:
-- INSERT_TO_COMPANY: {project_info.get('company_name', 'Client Company')}
-- INSERT_NAME_OF_PERSON: Project Manager or Contact Person
-- INSERT_PROJECT_NAME: {project_info.get('project_name', 'Electrical Project')}
-- DATE: {datetime.now().strftime('%B %d, %Y')}
-- EST: Generate appropriate estimate number
-- INSERT_ON_THE_BASIS_PARAGRAPH_HERE: Create description based on project type and Excel analysis
-- PROJECT_ORGANISER_NAME: {project_info.get('company_name', 'DDMac Electrical')}
-- PROJECT_ORGANISER_TITLE: Electrical Contractor
-
-Use Python code to:
-1. Read the Excel file to find the most important cost data from ALL SHEETS
-2. Open the ddmac_template.docx file
-3. Replace ALL the tags mentioned above with appropriate data
-4. Save as a new DOCX file and provide for download
-
-Do not change any other formatting or content in the document."""
-
-        # Send the message to the assistant
-        message = client.beta.threads.messages.create(
-            thread_id=st.session_state.thread_id,
-            role="user",
-            content=prompt
-        )
-        
-        # Create and run the assistant
-        run = client.beta.threads.runs.create(
-            thread_id=st.session_state.thread_id,
-            assistant_id=st.session_state.assistant_id
-        )
-        
-        return run.id, "Proposal generation started successfully"
-        
-    except Exception as e:
-        return None, f"Error generating proposal: {str(e)}"
-
-def check_proposal_generation_status(run_id):
-    """Check the status of proposal generation and retrieve the document if ready"""
-    try:
-        run = client.beta.threads.runs.retrieve(
-            thread_id=st.session_state.thread_id,
-            run_id=run_id
-        )
-        
-        if run.status == "completed":
-            # Retrieve the latest message from the assistant
-            messages = client.beta.threads.messages.list(
-                thread_id=st.session_state.thread_id,
-                limit=1
-            )
-            
-            if messages.data:
-                message = messages.data[0]
-                
-                # Check for file annotations in the message content
-                files_found = []
-                for content_block in message.content:
-                    if hasattr(content_block, 'text') and hasattr(content_block.text, 'annotations'):
-                        for annotation in content_block.text.annotations:
-                            if hasattr(annotation, 'file_path'):
-                                files_found.append(annotation.file_path.file_id)
-                
-                if files_found:
-                    return "completed", files_found[0], "Proposal document generated successfully"
-                else:
-                    # Check message content for any useful info
-                    content = message.content[0].text.value if message.content else "No response"
-                    return "completed", None, f"Generation completed but no file found. Response: {content[:300]}..."
-            else:
-                return "completed", None, "No response from assistant"
-                
-        elif run.status == "failed":
-            error_msg = run.last_error.message if run.last_error else 'Unknown error'
-            return "failed", None, f"Proposal generation failed: {error_msg}"
-        elif run.status in ["queued", "in_progress", "requires_action"]:
-            return "in_progress", None, "Proposal generation in progress..."
-        else:
-            return "unknown", None, f"Unknown status: {run.status}"
-            
-    except Exception as e:
-        return "error", None, f"Error checking status: {str(e)}"
-
-def download_generated_file(file_id, default_filename="DDMac_Proposal.docx"):
-    """Download the generated file from OpenAI"""
-    try:
-        # Get file content from OpenAI
-        file_content = client.files.content(file_id)
-        file_bytes = file_content.read()
-        
-        # Try to get original filename, fallback to default
-        try:
-            file_info = client.files.retrieve(file_id)
-            filename = file_info.filename or default_filename
-        except:
-            filename = default_filename
-            
-        return file_bytes, filename
-        
-    except Exception as e:
-        st.error(f"Error downloading file: {str(e)}")
-        return None, None
 
 # Custom CSS for better styling
 st.markdown("""
@@ -547,8 +377,6 @@ if 'floating_chat_messages' not in st.session_state:
     st.session_state.floating_chat_messages = []
 if 'assistant_id' not in st.session_state:
     st.session_state.assistant_id = None
-if 'generating_proposal' not in st.session_state:
-    st.session_state.generating_proposal = False
 
 # Header
 st.markdown("""
@@ -873,21 +701,6 @@ with col1:
                         if st.button(f"📋 Copy Assistant ID", key=f"copy_{result['type']}", use_container_width=True):
                             st.code(st.session_state.assistant_id)
                             st.success("Assistant ID displayed above - copy manually")
-        
-        # Add Proposal Generation Section (outside the loop)
-        if any(result['type'] == "Assistant Thread" for result in st.session_state.conversion_results):
-            st.markdown("---")
-            st.markdown("#### 📄 Document Generation")
-            
-            col_prop1, col_prop2 = st.columns(2)
-            with col_prop1:
-                if st.button("📋 Generate Proposal Document", key="generate_proposal", use_container_width=True, type="primary"):
-                    # Trigger proposal generation
-                    st.session_state.generating_proposal = True
-                    st.rerun()
-            
-            with col_prop2:
-                st.info("📝 Creates a professional proposal using your project data and template")
 
 with col2:
     # Quick Actions Panel
@@ -900,11 +713,11 @@ with col2:
     if st.session_state.conversion_results:
         st.markdown("**🎯 What you can do now:**")
         
-        # if st.button("💬 Start Chatting", use_container_width=True):
-        #     st.info("Navigate to Chat page to ask questions about your project")
+        if st.button("� Generate Documents", use_container_width=True, type="primary"):
+            st.switch_page("pages/Dashboard.py")
         
-        # if st.button("📄 Generate Documents", use_container_width=True):
-        #     st.info("Use chat to request Word docs, PDFs, or custom reports")
+        # if st.button("� Start Chatting", use_container_width=True):
+        #     st.info("Navigate to Chat page to ask questions about your project")
         
         # if st.button("📧 Email Results", use_container_width=True):
         #     st.success("Email integration will be implemented in backend phase")
@@ -935,94 +748,6 @@ with col2:
             st.metric("Vector Store", "❌ Failed")
     else:
         st.info("Upload a file to see statistics")
-
-# Handle Proposal Generation
-if st.session_state.get('generating_proposal', False):
-    st.markdown("---")
-    st.markdown("### 📋 Generating Proposal Document...")
-    
-    # Initialize the generation if not already started
-    if 'proposal_run_id' not in st.session_state:
-        with st.spinner("Starting proposal generation..."):
-            run_id, message = generate_proposal_document()
-            if run_id:
-                st.session_state.proposal_run_id = run_id
-                st.success(message)
-                st.info("⏳ The assistant is analyzing your Excel data and generating the proposal document...")
-                st.rerun()
-            else:
-                st.error(message)
-                st.session_state.generating_proposal = False
-                st.rerun()
-    else:
-        # Check the status of the ongoing generation
-        status, file_id, message = check_proposal_generation_status(st.session_state.proposal_run_id)
-        
-        if status == "completed":
-            if file_id:
-                st.success("🎉 Proposal document generated successfully!")
-                st.info("📋 Your professional proposal has been created with data from your Excel file!")
-                
-                # Download the file
-                file_content, filename = download_generated_file(file_id, "DDMac_Proposal.docx")
-                if file_content:
-                    st.download_button(
-                        label="📥 Download Proposal Document",
-                        data=file_content,
-                        file_name=filename,
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True,
-                        type="primary"
-                    )
-                    st.info("💡 The proposal includes cost analysis from your Excel data and follows professional formatting standards.")
-                
-                # Clean up session state
-                col_done1, col_done2 = st.columns(2)
-                with col_done1:
-                    if st.button("✅ Done", use_container_width=True):
-                        st.session_state.generating_proposal = False
-                        if 'proposal_run_id' in st.session_state:
-                            del st.session_state.proposal_run_id
-                        st.rerun()
-                with col_done2:
-                    if st.button("🔄 Generate Another", use_container_width=True):
-                        st.session_state.generating_proposal = False
-                        if 'proposal_run_id' in st.session_state:
-                            del st.session_state.proposal_run_id
-                        st.session_state.generating_proposal = True
-                        st.rerun()
-            else:
-                st.warning("⚠️ Generation completed but no document was produced.")
-                st.text(message)
-                if st.button("🔄 Try Again", use_container_width=True):
-                    st.session_state.generating_proposal = False
-                    if 'proposal_run_id' in st.session_state:
-                        del st.session_state.proposal_run_id
-                    st.rerun()
-                    
-        elif status == "failed":
-            st.error(f"❌ {message}")
-            st.error("The assistant encountered an issue while generating the proposal. Please try again.")
-            if st.button("🔄 Try Again", use_container_width=True):
-                st.session_state.generating_proposal = False
-                if 'proposal_run_id' in st.session_state:
-                    del st.session_state.proposal_run_id
-                st.rerun()
-                
-        elif status == "in_progress":
-            st.info(f"⏳ {message}")
-            st.info("🤖 The assistant is working on your proposal... This may take a few moments as it analyzes your Excel data and formats the document.")
-            # Auto-refresh every 5 seconds
-            time.sleep(3)
-            st.rerun()
-            
-        else:
-            st.error(f"⚠️ {message}")
-            if st.button("🔄 Try Again", use_container_width=True):
-                st.session_state.generating_proposal = False
-                if 'proposal_run_id' in st.session_state:
-                    del st.session_state.proposal_run_id
-                st.rerun()
 
 # Floating Chat Widget - Enhanced for Assistant API with actual chat
 if st.session_state.conversion_results and st.session_state.thread_id and st.session_state.assistant_id:
@@ -1204,9 +929,6 @@ with st.sidebar:
         st.session_state.proceed_with_processing = False
         st.session_state.floating_chat_open = False
         st.session_state.floating_chat_messages = []
-        st.session_state.generating_proposal = False
-        if 'proposal_run_id' in st.session_state:
-            del st.session_state.proposal_run_id
         st.rerun()
     
     # Assistant Thread Info

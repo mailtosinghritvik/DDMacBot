@@ -42,9 +42,17 @@ if 'current_thread_name' not in st.session_state:
     st.session_state.current_thread_name = None
 if 'messages' not in st.session_state:
     st.session_state.messages = []
+if 'extracted_definitions' not in st.session_state:
+    st.session_state.extracted_definitions = None
+if 'show_knowledge_preview' not in st.session_state:
+    st.session_state.show_knowledge_preview = False
 
 # Vector Store ID (same as Home.py)
 VECTOR_STORE_ID = 'vs_qUspcB7VllWXM4z7aAEdIK9L'
+
+# Assistant IDs
+MAIN_ASSISTANT_ID = "asst_Wk1Ue0iDYkhbdiXXDPPJsvAV"
+KNOWLEDGE_EXTRACTION_ASSISTANT_ID = "asst_eroB2BdDIRXlR7SikvVV7OgP"
 
 # Create upload directory
 UPLOAD_FOLDER = os.path.join(os.getcwd(), "temp")
@@ -315,18 +323,25 @@ def ask_question(question, thread_id):
             return None
 
         thread = st.session_state.threads[thread_id]['thread']
+        additional_instructions = """
+        Before answering any question, first check your knowledge base for any technical definitions, 
+        AccuBid terminology, or previously explained concepts that might be relevant to the user's question. 
+        Use these definitions to provide more accurate and contextually appropriate responses.
+        """
         
         # Create message
         message = client.beta.threads.messages.create(
             thread_id=thread.id,
             role="user",
-            content=question
+            content=str("USER'S QUESTION: ") + question + str("\n\n" + additional_instructions)
         )
 
-        # Run assistant (using same assistant as aceofSpades)
+        # Run assistant with enhanced instructions for knowledge-aware responses
+      
+        
         run = client.beta.threads.runs.create_and_poll(
             thread_id=thread.id,
-            assistant_id="asst_Wk1Ue0iDYkhbdiXXDPPJsvAV",
+            assistant_id=MAIN_ASSISTANT_ID,
         )
 
         # Get final response
@@ -339,6 +354,146 @@ def ask_question(question, thread_id):
     except Exception as e:
         st.error(f"Error processing question: {str(e)}")
         return None
+
+def extract_thread_history(thread_id):
+    """Extract full conversation history from a thread"""
+    try:
+        if thread_id not in st.session_state.threads:
+            return None
+            
+        client = get_client()
+        if not client:
+            return None
+            
+        thread = st.session_state.threads[thread_id]['thread']
+        
+        # Get all messages from the thread
+        messages = client.beta.threads.messages.list(
+            thread_id=thread.id,
+            order="asc"  # Get in chronological order
+        )
+        
+        # Format conversation history
+        conversation_text = ""
+        for message in messages.data:
+            role = message.role.capitalize()
+            content = message.content[0].text.value
+            conversation_text += f"{role}: {content}\n\n"
+        
+        return conversation_text
+        
+    except Exception as e:
+        st.error(f"Error extracting thread history: {str(e)}")
+        return None
+
+def extract_technical_knowledge(chat_history, thread_name):
+    """Send chat history to knowledge extraction assistant"""
+    try:
+        client = get_client()
+        if not client:
+            return None
+            
+        # Create a new thread for knowledge extraction
+        extraction_thread = client.beta.threads.create()
+        
+        # Craft the extraction prompt
+        extraction_prompt = f"""
+        Please analyze the following conversation and extract all technical terms, concepts, and definitions that were explained or defined during this chat.
+
+        IMPORTANT: Only return technical definitions that were actually explained or defined in this conversation. Do not include general knowledge or terms that weren't specifically discussed.
+
+        Please format your response as a clean list of definitions like this:
+
+        **Term 1**: Definition as explained in the conversation
+        **Term 2**: Definition as explained in the conversation
+        **Term 3**: Definition as explained in the conversation
+
+        If no technical definitions were found, simply respond with "No technical definitions found in this conversation."
+
+        Here is the conversation to analyze:
+
+        {chat_history}
+        """
+        
+        # Send the extraction request
+        client.beta.threads.messages.create(
+            thread_id=extraction_thread.id,
+            role="user",
+            content=extraction_prompt
+        )
+        
+        # Run the knowledge extraction assistant
+        run = client.beta.threads.runs.create_and_poll(
+            thread_id=extraction_thread.id,
+            assistant_id=KNOWLEDGE_EXTRACTION_ASSISTANT_ID
+        )
+        
+        # Get the extracted definitions
+        messages = client.beta.threads.messages.list(
+            thread_id=extraction_thread.id
+        )
+        
+        extracted_definitions = messages.data[0].content[0].text.value
+        
+        # Clean up the extraction thread (optional)
+        # client.beta.threads.delete(extraction_thread.id)
+        
+        return extracted_definitions
+        
+    except Exception as e:
+        st.error(f"Error extracting technical knowledge: {str(e)}")
+        return None
+
+def upload_definitions_to_vector_store(definitions, thread_name):
+    """Upload extracted definitions to vector store as markdown"""
+    try:
+        client = get_client()
+        if not client:
+            return False
+            
+        # Create markdown content
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        markdown_content = f"""# Technical Definitions from Conversation
+
+**Source Thread:** {thread_name}
+**Extracted Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**Type:** Conversational Knowledge Extraction
+
+---
+
+## Definitions
+
+{definitions}
+
+---
+
+*This document contains technical definitions and terminology extracted from user conversations to build persistent knowledge for the AccuBid AI assistant.*
+"""
+        
+        # Save to temporary file
+        temp_filename = f"Technical_Definitions_{timestamp}.md"
+        temp_path = os.path.join(UPLOAD_FOLDER, temp_filename)
+        
+        with open(temp_path, "w", encoding='utf-8') as f:
+            f.write(markdown_content)
+        
+        # Upload to vector store
+        with open(temp_path, "rb") as f:
+            file_batch = client.vector_stores.file_batches.upload_and_poll(
+                vector_store_id=VECTOR_STORE_ID,
+                files=[f]
+            )
+        
+        # Clean up
+        os.remove(temp_path)
+        
+        return file_batch.status == "completed"
+        
+    except Exception as e:
+        st.error(f"Error uploading definitions to vector store: {str(e)}")
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            os.remove(temp_path)
+        return False
 
 # Page UI
 st.title("🤖 AI Chat Assistant")
@@ -381,6 +536,27 @@ with st.sidebar:
                     st.success("Thread deleted")
                     st.rerun()
 
+        # Knowledge Extraction Button
+        st.markdown("---")
+        if st.session_state.current_thread_id and len(st.session_state.messages) > 0:
+            if st.button("🧠 Update Bot's Knowledge", use_container_width=True, help="Extract technical definitions from this conversation"):
+                with st.spinner("🔍 Extracting technical knowledge from conversation..."):
+                    # Extract thread history
+                    chat_history = extract_thread_history(st.session_state.current_thread_id)
+                    
+                    if chat_history:
+                        # Extract technical definitions
+                        definitions = extract_technical_knowledge(chat_history, st.session_state.current_thread_name)
+                        
+                        if definitions and "No technical definitions found" not in definitions:
+                            st.session_state.extracted_definitions = definitions
+                            st.session_state.show_knowledge_preview = True
+                            st.rerun()
+                        else:
+                            st.info("No technical definitions found in this conversation.")
+                    else:
+                        st.error("Failed to extract conversation history.")
+
     # File Upload
     st.markdown("---")
     st.subheader("📁 File Upload")
@@ -394,6 +570,42 @@ with st.sidebar:
 # Main chat interface
 if st.session_state.current_thread_id:
     st.write(f"**Current Thread:** {st.session_state.current_thread_name}")
+    
+    # Knowledge Preview Section
+    if st.session_state.show_knowledge_preview and st.session_state.extracted_definitions:
+        st.markdown("---")
+        st.markdown("### 🧠 Knowledge Extraction Preview")
+        st.info("📋 Review the technical definitions extracted from your conversation:")
+        
+        with st.expander("📖 Extracted Definitions", expanded=True):
+            st.markdown(st.session_state.extracted_definitions)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("✅ Save to Knowledge Base", type="primary", use_container_width=True):
+                with st.spinner("💾 Uploading definitions to knowledge base..."):
+                    if upload_definitions_to_vector_store(st.session_state.extracted_definitions, st.session_state.current_thread_name):
+                        st.success("🎉 Knowledge successfully added to bot's memory!")
+                        st.balloons()
+                    else:
+                        st.error("❌ Failed to upload definitions to knowledge base.")
+                
+                # Clear the preview
+                st.session_state.show_knowledge_preview = False
+                st.session_state.extracted_definitions = None
+                st.rerun()
+        
+        with col2:
+            if st.button("❌ Cancel", use_container_width=True):
+                st.session_state.show_knowledge_preview = False
+                st.session_state.extracted_definitions = None
+                st.rerun()
+        
+        with col3:
+            # Optional: Edit button for future enhancement
+            st.button("✏️ Edit (Coming Soon)", disabled=True, use_container_width=True)
+        
+        st.markdown("---")
     
     # Display message history
     for message in st.session_state.messages:

@@ -12,6 +12,21 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Vector Store ID for main RAG system (replace with your actual vector store ID)
 VECTOR_STORE_ID = 'vs_qUspcB7VllWXM4z7aAEdIK9L'
 
+# AccuBid standard sheet mappings
+ACCUBID_SHEET_MAPPINGS = {
+    "Ext": {"meaning": "Extensions", "description": "Total day to day material, eg screws, pipes, plugs, etc"},
+    "DirLb": {"meaning": "Direct Labour", "description": "Total electrical job labour hours"},
+    "IncLb": {"meaning": "Included Labour", "description": "Other nonelectrical labour items"},
+    "LbFac": {"meaning": "Labour Factor", "description": "Labour escalation due to unforeseen conditions"},
+    "LbEsc": {"meaning": "Labour Escalator", "description": "Yearly labour escalation, every year the labour rate goes up by a certain amount to counter inflation"},
+    "IndLb": {"meaning": "Indirect Labour", "description": "Labour costs for project mangers, project coordinators, engineers, etc."},
+    "Subs": {"meaning": "Subcontractors", "description": "Cost for subcontractors used in the project"},
+    "GnExp": {"meaning": "General Expenses", "description": "Electrical Safety Authority (ESA) fees, storage costs, temporary power and lighting costs"},
+    "Eqpmt": {"meaning": "Equipment", "description": "Scissor lifts, scaffoldings, cranes, and rentals, etc."},
+    "QtMat": {"meaning": "Quoted Materials", "description": "Supplier quotes for things like lighting, panels that have to be purchased based on the job"},
+    "FnPrc": {"meaning": "Final Price", "description": "Final prices of various elements of the job. The final price of the full job is in modified column at the bottom in the final price row."}
+}
+
 # Set page configuration
 st.set_page_config(
     page_title="AccuBid Converter",
@@ -38,18 +53,44 @@ def collect_sheet_info_simple(sheet_names):
     """Collect sheet information with simple UI and store in session state"""
     sheet_info = {}
     
+    # Add toggle for using standard AccuBid definitions
+    use_standard_mappings = st.checkbox(
+        "✅ Use standard AccuBid sheet definitions", 
+        value=True,
+        help="Automatically populate sheet descriptions based on AccuBid standards"
+    )
+    
+    if use_standard_mappings:
+        st.info("📝 Pre-filled with standard AccuBid definitions. You can modify if needed for this specific project.")
+    
     for sheet_name in sheet_names:
         col1, col2 = st.columns(2)
         with col1:
-            # Use session state to maintain values across reruns
-            default_meaning = st.session_state.sheet_info.get(sheet_name, {}).get('meaning', '')
+            # Check if this is a known AccuBid sheet type
+            default_meaning = ""
+            
+            # If we have predefined info for this sheet name and toggle is on, use it as default
+            if use_standard_mappings and sheet_name in ACCUBID_SHEET_MAPPINGS:
+                default_meaning = ACCUBID_SHEET_MAPPINGS[sheet_name]["meaning"]
+            # Otherwise use any previously entered value from session state
+            else:
+                default_meaning = st.session_state.sheet_info.get(sheet_name, {}).get('meaning', '')
+                
             meaning = st.text_input(f"What is '{sheet_name}'?", 
                                    value=default_meaning,
                                    key=f"meaning_{sheet_name}", 
                                    placeholder="e.g., Material costs, Labor hours...")
         with col2:
-            # Use session state to maintain values across reruns
-            default_description = st.session_state.sheet_info.get(sheet_name, {}).get('description', '')
+            # Check if this is a known AccuBid sheet type
+            default_description = ""
+            
+            # If we have predefined info for this sheet name and toggle is on, use it as default
+            if use_standard_mappings and sheet_name in ACCUBID_SHEET_MAPPINGS:
+                default_description = ACCUBID_SHEET_MAPPINGS[sheet_name]["description"]
+            # Otherwise use any previously entered value from session state
+            else:
+                default_description = st.session_state.sheet_info.get(sheet_name, {}).get('description', '')
+                
             description = st.text_input(f"Description of '{sheet_name}'", 
                                        value=default_description,
                                        key=f"desc_{sheet_name}",
@@ -383,6 +424,7 @@ st.markdown("""
 <div class="main-header">
     <h1>⚡ AccuBid Document Converter</h1>
     <p>Transform your AccuBid files with AI-powered analysis and Assistant API integration</p>
+    <p style="font-size: 0.9em; margin-top: 0;">Now with automatic sheet detection for standard AccuBid files!</p>
 </div>
 """, unsafe_allow_html=True)
 
